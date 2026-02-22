@@ -1,41 +1,42 @@
 <!--
 name: Now Playing 歌词
-description: 
+description: 需要Widdit/NowPlaying软件配合使用
 securityLevel: script
 overflow: hidden
-width: 1050
-height: 225
+width: 735
+height: 165
 opacity: 100
 pinned: true
-
-$bool | showTranslation | {"zh":"显示翻译", "en":"Show Translation"} : false    
+$str | EG | {"zh":"说明", "en":"Info"} | (multi, noedit) : 从这里了解用法：https://github.com/Lumi083/now-playing-MiraUI
+$bool | showTranslation | {"zh":"显示翻译", "en":"Show Translation"} : true
 $bool | autoWrap | {"zh":"自动换行", "en":"Auto Wrap"} : true
 $bool | karaokeMode | {"zh":"逐字特效", "en":"Karaoke Mode"} : true
+$bool | hideOnNoLyric | {"zh":"无歌词时隐藏", "en":"Hide When No Lyric"} : false
 $rgba | backgroundColor | {"zh":"背景颜色", "en":"Background Color"} : rgba(0, 0, 0, 0.3)
-$num | mainSize | {"zh":"主歌词字号", "en":"Main Font Size"} | (24~88, int) : 36
-$num | subSize | {"zh":"副歌词字号", "en":"Sub Font Size"} | (12~48, int) : 14
-$num | lineGap | {"zh":"行间距", "en":"Line Gap"} | (10~60, int) : 10
-$num | alignPos | {"zh":"垂直对齐", "en":"Vertical Align"} | (0.2~0.8, step=0.05) : 0.45
-$num | activeScale | {"zh":"激活缩放", "en":"Active Scale"} | (1.0~1.8, step=0.05) : 1.35
+$num | mainSize | {"zh":"主歌词字号", "en":"Main Font Size"} | (18~88, int) : 26
+$num | subSize | {"zh":"副歌词字号", "en":"Sub Font Size"} | (9~48, int) : 12
+$num | lineGap | {"zh":"行间距", "en":"Line Gap"} | (10~60, int) : 21
+$num | alignPos | {"zh":"垂直对齐", "en":"Vertical Align"} | (0.2~0.8, step=0.05) : 0.50
+$num | activeScale | {"zh":"激活缩放", "en":"Active Scale"} | (1.0~1.8, step=0.05) : 1.25
 $num | blurStrength | {"zh":"背景模糊", "en":"Blur Strength"} | (0~10, step=0.1) : 0
-$num | scrollSpeed | {"zh":"滚动速度", "en":"Scroll Speed"} | (0.02~0.5, step=0.01) : 0.25
+$num | scrollSpeed | {"zh":"滚动速度", "en":"Scroll Speed"} | (0.02~0.5, step=0.01) : 0.03
 $rgba | activeColor | {"zh":"已播放颜色", "en":"Played Color"} : rgba(255, 255, 255, 1)
-$rgba | pendingColor | {"zh":"待播放颜色", "en":"Pending Color"} : rgba(255, 255, 255, 0.5)
-$rgba | inactiveColor | {"zh":"非激活行颜色", "en":"Inactive Line Color"} : rgba(255, 255, 255, 0.3)
-$rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 220, 255, 0.6)
+$rgba | pendingColor | {"zh":"待播放颜色", "en":"Pending Color"} : rgba(255, 255, 255, 0.6)
+$rgba | inactiveColor | {"zh":"非激活行颜色", "en":"Inactive Line Color"} : rgba(255, 255, 255, 0.6)
+$rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 148, 255, 0.6)
 -->
 
 <style>
   :root {
     --bg-color: rgba(0,0,0,0.3);
     --active-color: #fff;
-    --pending-color: rgba(255,255,255,0.5);
-    --inactive-color: rgba(255,255,255,0.3);
+    --pending-color: rgba(255,255,255,0.6);
+    --inactive-color: rgba(255,255,255,0.6);
     --highlight-color: #4facfe;
     --active-line-color: var(--pending-color);
     --gap: 24px;
     --blur: 2px;
-    --scale: 1.3;
+    --scale: 1.28;
     --font-main: "Segoe UI", "Microsoft YaHei", sans-serif;
   }
 
@@ -201,7 +202,6 @@ $rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 22
 <div id="app">
   <div class="mask"></div>
   <div class="lyric-container" id="lyric-box"></div>
-  <div id="empty" class="empty-tip">Waiting for music...</div>
 </div>
 
 <script>
@@ -213,6 +213,7 @@ $rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 22
     showTranslation: true,
     autoWrap: true,
     karaokeMode: true,
+    hideOnNoLyric: false,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     mainSize: 48,
     subSize: 22,
@@ -255,16 +256,45 @@ $rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 22
     const lines = [];
     const rows = text.split(/\r?\n/);
     for (let row of rows) {
-      const timeTags = row.match(/\[\d{1,3}:\d{1,2}(?:\.\d{1,3})?\]/g);
+      // 支持多种时间格式: [MM:SS], [MM:SS.ms], [MM:SS:XX], [HH:MM:SS]
+      const timeTags = row.match(/\[\d{1,2}:\d{1,2}(?:[:.]\d{1,3})?\]/g);
       if (!timeTags) continue;
       const content = row.replace(/\[.*?\]/g, '').trim();
       if (!content) continue;
       for (let tag of timeTags) {
-        const m = tag.match(/\[(\d+):(\d+)(?:\.(\d+))?\]/);
-        const min = parseInt(m[1]);
-        const sec = parseInt(m[2]);
-        const ms = m[3] ? parseInt(m[3].padEnd(3, '0').slice(0,3)) : 0;
-        lines.push({ time: min * 60000 + sec * 1000 + ms, text: content, isKaraoke: false });
+        const m = tag.match(/\[(\d+):(\d+)(?:[:.]\d+)?\]/);
+        if (!m) continue;
+        const first = parseInt(m[1]);
+        const second = parseInt(m[2]);
+        
+        // 判断是 HH:MM:SS 还是 MM:SS[.ms]
+        // 如果第一个数字 > 59，则认为是 HH:MM:SS 格式
+        let time;
+        if (first > 59) {
+          time = first * 3600000 + second * 60000;
+        } else {
+          time = first * 60000 + second * 1000;
+        }
+        
+        // 提取毫秒部分（如果存在）
+        const msMatch = tag.match(/[:.]\d+\]/);
+        if (msMatch) {
+          const msStr = msMatch[0].slice(1, -1);
+          const msVal = parseInt(msStr);
+          // 如果是冒号格式 [MM:SS:XX]，XX可能是百分秒或毫秒
+          if (tag.includes(':') && msMatch[0].startsWith(':')) {
+            if (msStr.length <= 2) {
+              time += msVal * 10; // 百分秒转毫秒
+            } else {
+              time += msVal; // 已是毫秒
+            }
+          } else if (msMatch[0].startsWith('.')) {
+            // .格式是小数秒，需要转换
+            time += parseInt(msStr.padEnd(3, '0').slice(0, 3));
+          }
+        }
+        
+        lines.push({ time: Math.round(time), text: content, isKaraoke: false });
       }
     }
     return lines.sort((a,b) => a.time - b.time);
@@ -350,7 +380,16 @@ $rgba | highlightColor | {"zh":"辉光颜色", "en":"Glow Color"} : rgba(100, 22
   function renderDOM() {
     els.box.innerHTML = '';
     state.doms = [];
-    els.empty.style.display = state.lines.length ? 'none' : 'flex';
+    const hasLyric = state.lines.length && state.lines[0].text !== "No Lyric";
+    els.empty.style.display = hasLyric ? 'none' : 'flex';
+    // 处理无歌词时隐藏功能
+    if (!hasLyric && config.hideOnNoLyric) {
+      els.app.style.opacity = '0';
+      els.app.style.pointerEvents = 'none';
+    } else {
+      els.app.style.opacity = '1';
+      els.app.style.pointerEvents = 'auto';
+    }
     const frag = document.createDocumentFragment();
 
     state.lines.forEach((line) => {
