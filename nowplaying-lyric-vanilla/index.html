@@ -1,0 +1,206 @@
+<!--
+name: Now Playing 默认歌词卡片
+description: 
+securityLevel: wild
+overflow: hidden
+width: 480
+height: 480
+opacity: 100
+pinned: true
+$str | initial_url | {"zh":"网址", "en":"Initial URL"} | (single) : http://localhost:9863/lyric
+-->
+<!-- Copyright (c) 2025-2026 Mira team. All rights reserved. -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>浏览器</title>
+  <style>
+    * { box-sizing: border-box; }
+    /* 默认即为全屏/透明模式，移除所有头部UI样式 */
+    body { 
+      margin: 0; 
+      font-family: 'Segoe UI', Tahoma, sans-serif; 
+      background: transparent; /* 背景透明 */
+      color: #e2e8f0; 
+      height: 100vh; 
+      width: 100vw;
+      display: flex; 
+      flex-direction: column; 
+      overflow: hidden; 
+    }
+    
+    main { 
+      position: fixed; 
+      top: 0; 
+      left: 0; 
+      right: 0; 
+      bottom: 0; 
+      width: 100vw; 
+      height: 100vh; 
+      margin: 0; 
+      display: flex;
+      flex-direction: column; 
+      background: transparent; 
+      z-index: 100;
+    }
+
+    /* 内容容器 */
+    #frameWrapper { 
+      flex: 1; 
+      display: flex; 
+      align-items: center; 
+      justify-content: center; 
+      background: transparent; 
+      position: relative; 
+      width: 100%;
+      height: 100%;
+    }
+
+    #frame { 
+      width: 100%; 
+      height: 100%; 
+      border: none; 
+      background: transparent !important; 
+      display: none; 
+    }
+    
+    /* iframe加载完成后显示 */
+    #frame.visible { display: block; }
+    
+    /* 加载提示文字（可选） */
+    .loading-text {
+      color: #64748b;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="frameWrapper">
+      <span class="loading-text">Loading...</span>
+    </div>
+    <iframe id="frame" title="sandbox" sandbox="" allowtransparency="true" style="background: transparent;"></iframe>
+  </main>
+
+  <script>
+    // --- 工具函数 ---
+    
+    // 解析路径或URL
+    function resolveEntry(raw) {
+      let u = (raw || '').trim();
+      if (!u) return '';
+      if (/^[a-zA-Z]+:\/\//.test(u)) return u;
+      if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+      return u;
+    }
+
+    // --- 核心逻辑 ---
+
+    // 默认URL
+    let DEFAULT_URL = `https://www.bing.com/search?q=welcome`;
+    const SANDBOX_ATTR = 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation allow-pointer-lock allow-modals allow-orientation-lock';
+    
+    // 获取DOM元素
+    const els = {
+      iframe: document.getElementById('frame'),
+      frameWrapper: document.getElementById('frameWrapper')
+    };
+
+    // 控制加载状态显示
+    function setLoading(bool) {
+      if (!els.frameWrapper || !els.iframe) return;
+      if (bool) {
+        els.frameWrapper.style.display = 'flex';
+        els.iframe.classList.remove('visible');
+      } else {
+        els.frameWrapper.style.display = 'none';
+        els.iframe.classList.add('visible');
+      }
+    }
+
+    // 导航到指定URL
+    function navigateTo(url) {
+      if (!url) return;
+      const resolvedUrl = resolveEntry(url);
+      
+      setLoading(true);
+      
+      // 设置沙箱属性
+      els.iframe.setAttribute('sandbox', SANDBOX_ATTR);
+      
+      // 先加载空白页以重置环境
+      els.iframe.src = 'about:blank';
+      
+      setTimeout(() => {
+        els.iframe.src = resolvedUrl;
+        
+        // 简单的加载完成处理
+        els.iframe.onload = () => {
+          setLoading(false);
+        };
+        els.iframe.onerror = () => {
+          setLoading(false);
+        };
+      }, 50);
+    }
+
+    // --- MIRA 协议集成 ---
+
+    // 应用接收到的属性
+    function applyProps(props){
+      if (!props) return;
+
+      // 处理 initial_url
+      if (props.initial_url) {
+        const newUrl = resolveEntry(props.initial_url.trim());
+        if (newUrl) {
+          DEFAULT_URL = newUrl;
+          navigateTo(DEFAULT_URL);
+        }
+      }
+    }
+
+    // 监听宿主消息
+    window.addEventListener('message', (ev)=>{
+      try{
+        const d = ev?.data;
+        if (!d || typeof d !== 'object') return;
+        // 接收属性更新
+        if (d.type === '__MIRAAPI_PROPS__') {
+          window.__MIRAAPI_PROPS__ = d.props || {};
+          applyProps(window.__MIRAAPI_PROPS__);
+        }
+      }catch(e){
+        console.error("Error processing message:", e);
+      }
+    });
+
+    // 请求初始属性
+    function requestProps(){
+      try{
+        window.parent.postMessage({ type: '__MIRAAPI_REQUEST_PROPS__', id: window.__MIRAAPI_ELEMENT_ID__ }, '*');
+      } catch(e) {
+        console.error("Failed to request props:", e);
+      }
+      // 如果环境已预加载属性，直接应用
+      if (window.__MIRAAPI_PROPS__) applyProps(window.__MIRAAPI_PROPS__);
+    }
+
+    // --- 初始化 ---
+    document.addEventListener('DOMContentLoaded', () => {
+      // 1. 请求属性 (如果有 initial_url 会在 applyProps 中加载)
+      requestProps();
+
+      // 2. 如果没有通过 props 加载 (例如 props 延迟)，使用默认 URL 初始化
+      // 使用 setTimeout 稍微等待 props 返回，避免重复加载
+      setTimeout(() => {
+        if (!els.iframe.src || els.iframe.src === 'about:blank' || els.iframe.src === window.location.href) {
+            navigateTo(DEFAULT_URL);
+        }
+      }, 200);
+    });
+  </script>
+</body>
+</html>
