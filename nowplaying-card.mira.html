@@ -1,0 +1,444 @@
+<!--
+name: Now Playing 播放卡片
+description:
+securityLevel: script
+overflow: hidden
+width: 660
+height: 210
+opacity: 100
+pinned: true
+$num | refreshMs | {"zh":"轮询间隔(ms)", "en":"Refresh Interval (ms)"} | (120~3000, int) : 300
+$bool | showProgress | {"zh":"显示进度条", "en":"Show Progress"} : true
+$bool | useCoverAsBackground | {"zh":"封面作为背景", "en":"Use Cover As Background"} : true
+$num | coverBlur | {"zh":"背景模糊", "en":"Background Blur"} | (0~40, int) : 40
+$num | cornerRadius | {"zh":"圆角", "en":"Corner Radius"} | (0~48, int) : 17
+$num | titleSize | {"zh":"标题字号", "en":"Title Size"} | (16~72, int) : 40
+$num | artistSize | {"zh":"歌手字号", "en":"Artist Size"} | (12~48, int) : 17
+$rgba | bgColor | {"zh":"底色", "en":"Background"} : rgba(12, 14, 22, 0.20)
+$rgba | accentColor | {"zh":"轮廓色", "en":"Accent"} : rgba(255, 255, 255, 0)
+$rgba | titleColor | {"zh":"标题颜色", "en":"Title Color"} : rgba(255, 255, 255, 0.98)
+$rgba | subColor | {"zh":"副文本颜色", "en":"Sub Text Color"} : rgba(225, 231, 246, 0.88)
+$rgba | barBgColor | {"zh":"进度底色", "en":"Progress Background"} : rgba(255, 255, 255, 0.18)
+$rgba | barColor | {"zh":"进度颜色", "en":"Progress Color"} : rgba(255, 255, 255, 0.92)
+-->
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: transparent !important;
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    user-select: none;
+  }
+
+  .np-root {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 24px;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .np-bg {
+    position: absolute;
+    inset: -18px;
+    background-position: center;
+    background-size: cover;
+    filter: blur(20px) saturate(1.15);
+    transform: scale(1.08);
+    opacity: 1;
+    transition: background-image 260ms ease;
+  }
+
+  .np-overlay {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(140% 120% at 0% 0%, rgba(255, 255, 255, 0.16), transparent 45%),
+      linear-gradient(120deg, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.20) 38%, rgba(0, 0, 0, 0.54));
+    pointer-events: none;
+  }
+
+  .np-panel {
+    position: absolute;
+    inset: 0;
+    backdrop-filter: blur(2px);
+    display: grid;
+    gap: 18px;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+
+  .np-root.layout-horizontal .np-panel {
+    grid-template-columns: minmax(96px, 28%) 1fr;
+    align-items: center;
+  }
+
+  .np-root.layout-vertical .np-panel,
+  .np-root.layout-square .np-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .np-cover-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    height: auto;
+    border-radius: 18px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
+  }
+
+  .np-root.layout-vertical .np-cover-wrap {
+    width: min(100%, 220px);
+    margin: 0 auto;
+  }
+
+  .np-root.layout-square .np-cover-wrap {
+    display: none;
+  }
+
+  .np-root.layout-horizontal .np-cover-wrap {
+    max-height: 100%;
+    align-self: center;
+    justify-self: center;
+  }
+
+  .np-cover {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .np-cover-fallback {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    color: rgba(255, 255, 255, 0.72);
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    font-size: clamp(10px, 2.2vw, 18px);
+    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02));
+  }
+
+  .np-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .np-root.layout-vertical .np-main,
+  .np-root.layout-square .np-main {
+    align-items: center;
+    text-align: center;
+  }
+
+  .np-title,
+  .np-artist {
+    margin: 0;
+    padding: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.42);
+  }
+
+  .np-title {
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.12;
+  }
+
+  .np-artist {
+    font-size: 22px;
+    font-weight: 500;
+    opacity: 0.95;
+  }
+
+  .np-progress-wrap {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .np-progress {
+    width: 100%;
+    height: 9px;
+    border-radius: 999px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .np-progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    transition: width 140ms linear;
+    box-shadow: 0 0 12px rgba(255, 255, 255, 0.36);
+  }
+
+  .np-times {
+    display: flex;
+    justify-content: space-between;
+    font-size: clamp(11px, 1.9vh, 15px);
+    opacity: 0.85;
+    font-variant-numeric: tabular-nums;
+  }
+</style>
+
+<div id="np-root" class="np-root layout-horizontal">
+  <div id="np-bg" class="np-bg"></div>
+  <div class="np-overlay"></div>
+  <div id="np-panel" class="np-panel">
+    <div id="np-cover-wrap" class="np-cover-wrap">
+      <img id="np-cover" class="np-cover" alt="cover" />
+      <div id="np-cover-fallback" class="np-cover-fallback">NOW PLAYING</div>
+    </div>
+    <div class="np-main">
+      <h1 id="np-title" class="np-title">暂无播放</h1>
+      <p id="np-artist" class="np-artist">等待播放器连接...</p>
+      <div id="np-progress-wrap" class="np-progress-wrap">
+        <div id="np-progress" class="np-progress"><div id="np-progress-fill" class="np-progress-fill"></div></div>
+        <div class="np-times">
+          <span id="np-current">0:00</span>
+          <span id="np-duration">0:00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const BASE = 'http://localhost:9863';
+  const DEFAULT = {
+    refreshMs: 300,
+    showProgress: true,
+    useCoverAsBackground: true,
+    coverBlur: 20,
+    cornerRadius: 24,
+    titleSize: 38,
+    artistSize: 22,
+    bgColor: 'rgba(12, 14, 22, 0.70)',
+    accentColor: 'rgba(255, 255, 255, 0.28)',
+    titleColor: 'rgba(255, 255, 255, 0.98)',
+    subColor: 'rgba(225, 231, 246, 0.88)',
+    barBgColor: 'rgba(255, 255, 255, 0.18)',
+    barColor: 'rgba(255, 255, 255, 0.92)'
+  };
+
+  const cfg = { ...DEFAULT };
+  const els = {
+    root: document.getElementById('np-root'),
+    bg: document.getElementById('np-bg'),
+    panel: document.getElementById('np-panel'),
+    cover: document.getElementById('np-cover'),
+    coverWrap: document.getElementById('np-cover-wrap'),
+    coverFallback: document.getElementById('np-cover-fallback'),
+    title: document.getElementById('np-title'),
+    artist: document.getElementById('np-artist'),
+    progressWrap: document.getElementById('np-progress-wrap'),
+    progress: document.getElementById('np-progress'),
+    progressFill: document.getElementById('np-progress-fill'),
+    current: document.getElementById('np-current'),
+    duration: document.getElementById('np-duration')
+  };
+
+  let timer = null;
+  let lastCover = '';
+  let layoutMode = '';
+
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function toInt(v, fallback) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function formatTime(totalSeconds) {
+    const s = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const m = Math.floor(s / 60);
+    const sec = String(s % 60).padStart(2, '0');
+    return m + ':' + sec;
+  }
+
+  function applyProps(props) {
+    if (!props || typeof props !== 'object') return;
+
+    Object.assign(cfg, props);
+    cfg.refreshMs = clamp(toInt(cfg.refreshMs, DEFAULT.refreshMs), 120, 3000);
+    cfg.coverBlur = clamp(toInt(cfg.coverBlur, DEFAULT.coverBlur), 0, 40);
+    cfg.cornerRadius = clamp(toInt(cfg.cornerRadius, DEFAULT.cornerRadius), 0, 48);
+    cfg.titleSize = clamp(toInt(cfg.titleSize, DEFAULT.titleSize), 16, 72);
+    cfg.artistSize = clamp(toInt(cfg.artistSize, DEFAULT.artistSize), 12, 48);
+
+    els.root.style.borderRadius = cfg.cornerRadius + 'px';
+    els.panel.style.border = '1px solid ' + cfg.accentColor;
+    els.panel.style.background = cfg.bgColor;
+    els.bg.style.filter = 'blur(' + cfg.coverBlur + 'px) saturate(1.15)';
+
+    els.title.style.fontSize = cfg.titleSize + 'px';
+    els.artist.style.fontSize = cfg.artistSize + 'px';
+    els.title.style.color = cfg.titleColor;
+    els.artist.style.color = cfg.subColor;
+
+    els.progress.style.background = cfg.barBgColor;
+    els.progressFill.style.background = cfg.barColor;
+    els.current.style.color = cfg.subColor;
+    els.duration.style.color = cfg.subColor;
+
+    els.progressWrap.style.display = cfg.showProgress ? 'flex' : 'none';
+
+    syncBackground();
+  }
+
+  function escapedUrl(url) {
+    return 'url("' + String(url || '').replace(/"/g, '\\"') + '")';
+  }
+
+  function syncBackground() {
+    if (layoutMode === 'square') {
+      els.bg.style.backgroundImage = 'none';
+      return;
+    }
+    if (cfg.useCoverAsBackground && lastCover) {
+      els.bg.style.backgroundImage = escapedUrl(lastCover);
+    } else {
+      els.bg.style.backgroundImage = 'none';
+    }
+  }
+
+  function updateCoverSize() {
+    if (!els.coverWrap) return;
+    els.coverWrap.style.width = '';
+    els.coverWrap.style.height = '';
+    if (layoutMode !== 'horizontal') return;
+
+    const rootHeight = els.root.clientHeight || window.innerHeight || 0;
+    const availableHeight = Math.max(96, rootHeight - 32);
+    const panelWidth = els.panel.clientWidth || els.root.clientWidth || 0;
+    const columnWidth = Math.max(96, panelWidth * 0.28);
+    const size = Math.max(96, Math.min(availableHeight, columnWidth, 220));
+    els.coverWrap.style.width = size + 'px';
+    els.coverWrap.style.height = size + 'px';
+  }
+
+  function pickLayout() {
+    const w = els.root.clientWidth || window.innerWidth || 0;
+    const h = els.root.clientHeight || window.innerHeight || 1;
+    const ratio = w / Math.max(1, h);
+
+    if (ratio >= 1.7) return 'horizontal';
+    if (ratio <= 1.7) return 'vertical';
+    return 'square';
+  }
+
+  function applyLayout(mode) {
+    if (!mode || mode === layoutMode) return;
+    layoutMode = mode;
+    els.root.classList.remove('layout-horizontal', 'layout-vertical', 'layout-square');
+    els.root.classList.add('layout-' + mode);
+    syncBackground();
+  }
+
+  function updateLayout() {
+    applyLayout(pickLayout());
+    updateCoverSize();
+  }
+
+  function bindCover(url) {
+    if (!url) {
+      lastCover = '';
+      els.cover.removeAttribute('src');
+      els.coverFallback.style.display = 'grid';
+      syncBackground();
+      return;
+    }
+
+    if (lastCover === url) {
+      syncBackground();
+      return;
+    }
+    lastCover = url;
+
+    els.cover.src = url;
+    els.coverFallback.style.display = 'none';
+    syncBackground();
+  }
+
+  function render(query) {
+    const track = (query && query.track) || {};
+    const player = (query && query.player) || {};
+
+    const title = track.title || '暂无播放';
+    const artist = track.author || '等待播放器连接...';
+
+    els.title.textContent = title;
+    els.artist.textContent = artist;
+
+    bindCover(track.cover || '');
+
+    const durationSec = Math.max(0, Number(track.duration) || 0);
+    const currentSec = Math.max(0, Number(player.seekbarCurrentPosition) || 0);
+    const ratio = durationSec > 0 ? clamp(currentSec / durationSec, 0, 1) : 0;
+
+    els.progressFill.style.width = (ratio * 100).toFixed(2) + '%';
+    els.current.textContent = formatTime(currentSec);
+    els.duration.textContent = formatTime(durationSec);
+  }
+
+  async function pull() {
+    try {
+      const resp = await fetch(BASE + '/api/query', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const query = await resp.json();
+      render(query);
+    } catch (err) {
+      // 静默失败，避免组件抖动
+    }
+  }
+
+  function restartTimer() {
+    if (timer) clearInterval(timer);
+    timer = setInterval(pull, cfg.refreshMs);
+  }
+
+  window.addEventListener('message', (ev) => {
+    const d = ev && ev.data;
+    if (!d || typeof d !== 'object') return;
+    if (d.type === '__MIRAAPI_PROPS__') {
+      applyProps(d.props || {});
+      updateLayout();
+      restartTimer();
+      pull();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    updateLayout();
+  });
+
+  applyProps(window.__MIRAAPI_PROPS__ || {});
+  updateLayout();
+  try {
+    window.parent.postMessage({ type: '__MIRAAPI_REQUEST_PROPS__', id: window.__MIRAAPI_ELEMENT_ID__ }, '*');
+  } catch (e) {}
+
+  restartTimer();
+  pull();
+})();
+</script>
